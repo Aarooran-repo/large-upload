@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:file="http://www.mulesoft.org/schema/mule/file"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+	<http:request-config name="HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="303d460c-f385-461b-a2b4-055fff07964d" >
+		<http:request-connection protocol="HTTPS" host="${sf.login_domain}" />
+	</http:request-config>
+	<configuration-properties doc:name="Configuration properties" doc:id="fdb212ec-af33-488f-b701-6d0dd2b8793e" file="mule-properties.yaml" />
+	<file:config name="File_Config" doc:name="File Config" doc:id="be2cdaa8-72d0-46e6-8749-762007cb752b" >
+		<file:connection/>
+	</file:config>
+	<file:config name="File_Config1" doc:name="File Config" doc:id="86c8b0c8-81eb-4e2f-b352-b79643c36c80" >
+		<file:connection workingDir="C:\Boomi AtomSphere" />
+	</file:config>
+	<http:request-config name="HTTP_Request_configuration1" doc:name="HTTP Request configuration" doc:id="e864d212-b946-4a3f-992d-c4fce7a0567d" >
+		<http:request-connection protocol="HTTPS" />
+	</http:request-config>
+	<http:request-config name="HTTP_Request_configuration2" doc:name="HTTP Request configuration" doc:id="ddee4e69-5799-417b-b866-068e08481e5a" >
+		<http:request-connection protocol="HTTPS" host='#[vars.instance_url]'/>
+	</http:request-config>
+	<flow name="large-uploadFlow" doc:id="edd25e3d-9a14-40fa-a987-c4ff916b6460" >
+		<scheduler doc:name="Scheduler" doc:id="8248a622-e4d8-4a62-a8fc-c3b9871039a6" >
+			<scheduling-strategy >
+				<fixed-frequency frequency="1" timeUnit="DAYS"/>
+			</scheduling-strategy>
+		</scheduler>
+		<flow-ref doc:name="Get SF token" doc:id="98e1038b-c4a8-4ebb-89b0-ac1799c3f1d6" name="sf-token"/>
+		<set-variable value='#[vars.sf_token.instance_url replace "https://" with("")]' doc:name="Set Variable" doc:id="59185e14-3e67-4dcc-b1af-ca76a51c42ec" variableName="instance_url" />
+		<file:read doc:name="Read" doc:id="230a4675-5fcf-4221-af2a-465b64573de0" config-ref="File_Config" path="${file.path}"/>
+		<foreach doc:name="For Each" doc:id="9a44ec98-eb52-428f-a695-cc24c5956791" >
+			<set-variable value="#[payload]" doc:name="Set Variable" doc:id="1c28171f-ad10-47e7-975d-cba5d53d5f74" variableName="csvpayload"/>
+			<flow-ref doc:name="Get File" doc:id="e04beca6-e7f0-427c-b9ba-cda25e0277d1" name="get-file"/>
+			<ee:transform doc:name="Transform Message" doc:id="9898324b-ed77-4583-ad14-4ed85f9b8e11" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+import toBinary from dw::core::Numbers
+output multipart/form-data
+boundary='boundary_string'
+---
+{
+    parts : {
+        entity_content : {
+        headers : {
+            "Content-Type": "application/json"
+        },
+        content : {
+            "Title" : vars.csvpayload[0].title,
+            "PathOnClient" : vars.csvpayload[0].Pathonclient
+        }
+      },
+      file1 : {
+        headers : {
+            "Content-Disposition" : {
+                name : "VersionData",
+                filename : vars.csvpayload[0].title,
+                subtype : "form-data"
+            },
+            "Content-Type" : "application/octet-stream"
+        },
+        content: vars.file
+      }
+    }
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<http:request method="POST" doc:name="Request" doc:id="1a3e727b-0db6-4529-998b-a2a3484ed59e" config-ref="HTTP_Request_configuration2" path="/services/data/v52.0/sobjects/ContentVersion">
+				<http:headers ><![CDATA[#[output application/java
+---
+{
+	"Authorization" : "Bearer "++ vars.sf_token.access_token,
+	"Content-Type" : "multipart/form-data; boundary=\"boundary_string\""
+}]]]></http:headers>
+			</http:request>
+			<logger level="INFO" doc:name="Logger" doc:id="230d19a1-5887-4064-bfee-f13f1a114eb1" message="#[payload]"/>
+		</foreach>
+	</flow>
+	<sub-flow name="sf-token" doc:id="182ca29f-e987-45c3-a595-f7fe28727516" >
+		<http:request method="POST" doc:name="Request" doc:id="7abd869f-943d-49a3-8324-a1466c81fa76" config-ref="HTTP_Request_configuration" path="${sf.token_path}">
+			<http:body><![CDATA[#[output application/x-www-form-urlencoded
+---
+{
+    "grant_type": "password",
+    "client_id": p('sf.client_id') ,
+    "client_secret": p('sf.client_secret'),
+    "username": p('sf.username'),
+    "password": p('sf.password')
+}]]]></http:body>
+			<http:headers><![CDATA[#[output application/java
+---
+{
+	"Accept" : "application/json",
+	"Content-Type" : "application/x-www-form-urlencoded"
+}]]]></http:headers>
+		</http:request>
+		<set-variable value="#[payload]" doc:name="Set Variable" doc:id="1b330697-5210-432a-b40b-8d0488c287d8" variableName="sf_token"/>
+	</sub-flow>
+	<sub-flow name="get-file" doc:id="5aad8cf8-9c9f-4a8b-b553-667bc434557a" >
+		<file:read doc:name="Read" doc:id="fc3ea2e1-e95b-4824-90b8-bbf3dcd0b8a4" config-ref="File_Config1" path="#[payload[0].contentversion]"/>
+		<set-variable value="#[payload]" doc:name="Set Variable" doc:id="fb7ab969-9d46-4e67-b4cf-9598b362ca61" variableName="file"/>
+	</sub-flow>
+</mule>

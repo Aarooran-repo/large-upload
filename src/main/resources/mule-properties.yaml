@@ -1,0 +1,11 @@
+sf:
+  client_id: ""
+  client_secret: ""
+  grant_type: ""
+  username: ""
+  password: ""
+  token_path: ""
+  login_domain: ""
+  
+file:
+  path: ""
